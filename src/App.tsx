@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
+import { WelcomeView } from './components/WelcomeView';
 import { Dashboard } from './components/Dashboard';
 import { RoutineManager } from './components/RoutineManager';
 import { SubjectList } from './components/SubjectList';
@@ -11,22 +12,37 @@ import { AuthModal } from './components/AuthModal';
 import { ShieldCheck } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { activeTab } = useApp();
+  const { activeTab, isAuthenticated, enterDemoMode } = useApp();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+
+  const handleOpenAuth = (mode: 'login' | 'register' = 'login') => {
+    setAuthMode(mode);
+    setIsAuthOpen(true);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-200">
       {/* Top Navbar */}
-      <Navbar onOpenAuth={() => setIsAuthOpen(true)} />
+      <Navbar onOpenAuth={() => handleOpenAuth('login')} />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-20">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'routine' && <RoutineManager />}
-        {activeTab === 'subjects' && <SubjectList />}
-        {activeTab === 'simulator' && <LeaveSimulator />}
-        {activeTab === 'history' && <HistoryLog />}
-        {activeTab === 'settings' && <SemesterManager />}
+        {!isAuthenticated ? (
+          <WelcomeView
+            onOpenAuth={handleOpenAuth}
+            onEnterDemo={enterDemoMode}
+          />
+        ) : (
+          <>
+            {activeTab === 'dashboard' && <Dashboard />}
+            {activeTab === 'routine' && <RoutineManager />}
+            {activeTab === 'subjects' && <SubjectList />}
+            {activeTab === 'simulator' && <LeaveSimulator />}
+            {activeTab === 'history' && <HistoryLog />}
+            {activeTab === 'settings' && <SemesterManager />}
+          </>
+        )}
       </main>
 
       {/* Footer */}
@@ -50,7 +66,11 @@ const AppContent: React.FC = () => {
       </footer>
 
       {/* Auth / Account Modal */}
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        initialMode={authMode}
+      />
     </div>
   );
 };

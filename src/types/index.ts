@@ -53,7 +53,21 @@ export interface UserProfile {
   name: string;
   college?: string;
   semesterName: string;
+  isDemo?: boolean;
 }
+
+export interface UserWorkspaceData {
+  user: UserProfile;
+  subjects: Subject[];
+  routine: RoutineSlot[];
+  attendanceRecords: AttendanceRecord[];
+  semesterArchives: SemesterArchive[];
+}
+
+export type ActiveSession =
+  | { type: 'demo' }
+  | { type: 'user'; userId: string }
+  | null;
 
 export interface AttendanceMetrics {
   percentage: number;

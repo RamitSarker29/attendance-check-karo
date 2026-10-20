@@ -1,5 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { Subject, RoutineSlot, AttendanceRecord, SemesterArchive, UserProfile, AttendanceStatus } from '../types';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type {
+  Subject,
+  RoutineSlot,
+  AttendanceRecord,
+  SemesterArchive,
+  UserProfile,
+  AttendanceStatus,
+  UserWorkspaceData,
+  ActiveSession,
+} from '../types';
 import { DEFAULT_USER, SAMPLE_SUBJECTS, SAMPLE_ROUTINE } from '../utils/initialData';
 import { getTodayDateString } from '../utils/calculations';
 import confetti from 'canvas-confetti';
@@ -7,19 +16,24 @@ import confetti from 'canvas-confetti';
 interface AppContextType {
   user: UserProfile | null;
   isAuthenticated: boolean;
+  isDemoMode: boolean;
   theme: 'dark' | 'light';
   isOffline: boolean;
   subjects: Subject[];
   routine: RoutineSlot[];
   attendanceRecords: AttendanceRecord[];
   semesterArchives: SemesterArchive[];
+  registeredUsers: UserProfile[];
   activeTab: 'dashboard' | 'routine' | 'subjects' | 'simulator' | 'history' | 'settings';
   setActiveTab: (tab: 'dashboard' | 'routine' | 'subjects' | 'simulator' | 'history' | 'settings') => void;
   toggleTheme: () => void;
-  login: (email: string, name?: string) => void;
-  register: (email: string, name: string) => void;
-  loginAsGuest: () => void;
+  login: (email: string) => { success: boolean; error?: string };
+  register: (email: string, name: string, college?: string) => { success: boolean; error?: string };
+  enterDemoMode: () => void;
+  exitDemoMode: () => void;
+  loginAsGuest: () => void; // alias for enterDemoMode
   logout: () => void;
+  switchUser: (userId: string) => void;
   addSubject: (subject: Omit<Subject, 'id'>) => void;
   updateSubject: (subject: Subject) => void;
   deleteSubject: (id: string) => void;
@@ -38,13 +52,118 @@ interface AppContextType {
 }
 
 const STORAGE_KEYS = {
-  USER: 'ack_user',
   THEME: 'ack_theme',
+  SESSION: 'ack_session',
+  DEMO_WORKSPACE: 'ack_demo_workspace',
+  USERS_INDEX: 'ack_registered_users',
+  USER_WORKSPACE_PREFIX: 'ack_user_workspace_',
+};
+
+const LEGACY_KEYS = {
+  USER: 'ack_user',
   SUBJECTS: 'ack_subjects',
   ROUTINE: 'ack_routine',
   RECORDS: 'ack_records',
   ARCHIVES: 'ack_archives',
 };
+
+// Safe JSON parser helper
+function safeJsonParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+// Perform one-time legacy migration to preserve any existing data
+function runLegacyMigration() {
+  try {
+    const legacyUserStr = localStorage.getItem(LEGACY_KEYS.USER);
+    if (!legacyUserStr) return; // No legacy data
+
+    const legacyUser = safeJsonParse<UserProfile | null>(legacyUserStr, null);
+    if (!legacyUser) return;
+
+    const legacySubjects = safeJsonParse<Subject[]>(localStorage.getItem(LEGACY_KEYS.SUBJECTS), []);
+    const legacyRoutine = safeJsonParse<RoutineSlot[]>(localStorage.getItem(LEGACY_KEYS.ROUTINE), []);
+    const legacyRecords = safeJsonParse<AttendanceRecord[]>(localStorage.getItem(LEGACY_KEYS.RECORDS), []);
+    const legacyArchives = safeJsonParse<SemesterArchive[]>(localStorage.getItem(LEGACY_KEYS.ARCHIVES), []);
+
+    const isUntouchedDemo = legacyUser.id === 'usr_demo_1' && legacyUser.name === 'Aman Sharma';
+
+    if (isUntouchedDemo) {
+      // Migrate to isolated Demo Workspace
+      const demoData: UserWorkspaceData = {
+        user: DEFAULT_USER,
+        subjects: legacySubjects.length > 0 ? legacySubjects : SAMPLE_SUBJECTS,
+        routine: legacyRoutine.length > 0 ? legacyRoutine : SAMPLE_ROUTINE,
+        attendanceRecords: legacyRecords,
+        semesterArchives: legacyArchives,
+      };
+      localStorage.setItem(STORAGE_KEYS.DEMO_WORKSPACE, JSON.stringify(demoData));
+    } else {
+      // It's a customized user account! Migrate into User Partition
+      const userData: UserWorkspaceData = {
+        user: { ...legacyUser, isDemo: false },
+        subjects: legacySubjects,
+        routine: legacyRoutine,
+        attendanceRecords: legacyRecords,
+        semesterArchives: legacyArchives,
+      };
+
+      // Add to registered users
+      const existingUsers = safeJsonParse<UserProfile[]>(localStorage.getItem(STORAGE_KEYS.USERS_INDEX), []);
+      if (!existingUsers.some(u => u.id === legacyUser.id)) {
+        existingUsers.push(userData.user);
+        localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(existingUsers));
+      }
+
+      // Save user workspace
+      localStorage.setItem(
+        `${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${legacyUser.id}`,
+        JSON.stringify(userData)
+      );
+
+      // Restore active session for this user
+      const userSession: ActiveSession = { type: 'user', userId: legacyUser.id };
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(userSession));
+    }
+
+    // Clean up legacy keys safely
+    localStorage.removeItem(LEGACY_KEYS.USER);
+    localStorage.removeItem(LEGACY_KEYS.SUBJECTS);
+    localStorage.removeItem(LEGACY_KEYS.ROUTINE);
+    localStorage.removeItem(LEGACY_KEYS.RECORDS);
+    localStorage.removeItem(LEGACY_KEYS.ARCHIVES);
+  } catch (err) {
+    console.warn('Migration warning:', err);
+  }
+}
+
+// Run migration once before component mounts
+runLegacyMigration();
+
+// Helper to get or create demo workspace
+function getInitialDemoWorkspace(): UserWorkspaceData {
+  const saved = localStorage.getItem(STORAGE_KEYS.DEMO_WORKSPACE);
+  if (saved) {
+    const parsed = safeJsonParse<UserWorkspaceData | null>(saved, null);
+    if (parsed && parsed.user && parsed.subjects) {
+      return parsed;
+    }
+  }
+  const defaultDemo: UserWorkspaceData = {
+    user: DEFAULT_USER,
+    subjects: SAMPLE_SUBJECTS,
+    routine: SAMPLE_ROUTINE,
+    attendanceRecords: [],
+    semesterArchives: [],
+  };
+  localStorage.setItem(STORAGE_KEYS.DEMO_WORKSPACE, JSON.stringify(defaultDemo));
+  return defaultDemo;
+}
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -55,20 +174,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved === 'light' ? 'light' : 'dark';
   });
 
-  // User state
-  const [user, setUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.USER);
-    if (saved) {
-      try { return JSON.parse(saved); } catch { return null; }
-    }
-    // Default logged in with demo profile so the student can immediately test all features!
-    return DEFAULT_USER;
+  // Active session: null by default for new visitors!
+  const [activeSession, setActiveSession] = useState<ActiveSession>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SESSION);
+    return safeJsonParse<ActiveSession>(saved, null);
   });
 
-  // Navigation tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'routine' | 'subjects' | 'simulator' | 'history' | 'settings'>('dashboard');
+  // Registered local users list
+  const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>(() => {
+    return safeJsonParse<UserProfile[]>(localStorage.getItem(STORAGE_KEYS.USERS_INDEX), []);
+  });
 
-  // Network state
+  // Active workspace state
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    if (activeSession?.type === 'demo') {
+      return DEFAULT_USER;
+    }
+    if (activeSession?.type === 'user') {
+      const workspace = safeJsonParse<UserWorkspaceData | null>(
+        localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${activeSession.userId}`),
+        null
+      );
+      return workspace ? workspace.user : null;
+    }
+    return null; // Visitors start logged out!
+  });
+
+  const [subjects, setSubjects] = useState<Subject[]>(() => {
+    if (activeSession?.type === 'demo') {
+      return getInitialDemoWorkspace().subjects;
+    }
+    if (activeSession?.type === 'user') {
+      const workspace = safeJsonParse<UserWorkspaceData | null>(
+        localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${activeSession.userId}`),
+        null
+      );
+      return workspace ? workspace.subjects : [];
+    }
+    return [];
+  });
+
+  const [routine, setRoutine] = useState<RoutineSlot[]>(() => {
+    if (activeSession?.type === 'demo') {
+      return getInitialDemoWorkspace().routine;
+    }
+    if (activeSession?.type === 'user') {
+      const workspace = safeJsonParse<UserWorkspaceData | null>(
+        localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${activeSession.userId}`),
+        null
+      );
+      return workspace ? workspace.routine : [];
+    }
+    return [];
+  });
+
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
+    if (activeSession?.type === 'demo') {
+      return getInitialDemoWorkspace().attendanceRecords;
+    }
+    if (activeSession?.type === 'user') {
+      const workspace = safeJsonParse<UserWorkspaceData | null>(
+        localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${activeSession.userId}`),
+        null
+      );
+      return workspace ? workspace.attendanceRecords : [];
+    }
+    return [];
+  });
+
+  const [semesterArchives, setSemesterArchives] = useState<SemesterArchive[]>(() => {
+    if (activeSession?.type === 'demo') {
+      return getInitialDemoWorkspace().semesterArchives;
+    }
+    if (activeSession?.type === 'user') {
+      const workspace = safeJsonParse<UserWorkspaceData | null>(
+        localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${activeSession.userId}`),
+        null
+      );
+      return workspace ? workspace.semesterArchives : [];
+    }
+    return [];
+  });
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'routine' | 'subjects' | 'simulator' | 'history' | 'settings'>('dashboard');
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
 
   useEffect(() => {
@@ -98,95 +286,205 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Subjects state
-  const [subjects, setSubjects] = useState<Subject[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
-    if (saved) {
-      try { return JSON.parse(saved); } catch { return SAMPLE_SUBJECTS; }
-    }
-    return SAMPLE_SUBJECTS;
-  });
+  const isDemoMode = activeSession?.type === 'demo';
 
-  // Routine state
-  const [routine, setRoutine] = useState<RoutineSlot[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ROUTINE);
-    if (saved) {
-      try { return JSON.parse(saved); } catch { return SAMPLE_ROUTINE; }
-    }
-    return SAMPLE_ROUTINE;
-  });
-
-  // Attendance history logs
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.RECORDS);
-    if (saved) {
-      try { return JSON.parse(saved); } catch { return []; }
-    }
-    return [];
-  });
-
-  // Archived semesters
-  const [semesterArchives, setSemesterArchives] = useState<SemesterArchive[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ARCHIVES);
-    if (saved) {
-      try { return JSON.parse(saved); } catch { return []; }
-    }
-    return [];
-  });
-
-  // Local storage synchronization
+  // Persistence: sync active workspace whenever data changes
   useEffect(() => {
-    if (user) {
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+    if (activeSession?.type === 'demo') {
+      const demoData: UserWorkspaceData = {
+        user: user || DEFAULT_USER,
+        subjects,
+        routine,
+        attendanceRecords,
+        semesterArchives,
+      };
+      localStorage.setItem(STORAGE_KEYS.DEMO_WORKSPACE, JSON.stringify(demoData));
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(activeSession));
+    } else if (activeSession?.type === 'user' && user) {
+      const userData: UserWorkspaceData = {
+        user,
+        subjects,
+        routine,
+        attendanceRecords,
+        semesterArchives,
+      };
+      localStorage.setItem(
+        `${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${user.id}`,
+        JSON.stringify(userData)
+      );
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(activeSession));
     } else {
-      localStorage.removeItem(STORAGE_KEYS.USER);
+      localStorage.removeItem(STORAGE_KEYS.SESSION);
     }
-  }, [user]);
+  }, [activeSession, user, subjects, routine, attendanceRecords, semesterArchives]);
 
+  // Sync registered users list
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
-  }, [subjects]);
+    localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(registeredUsers));
+  }, [registeredUsers]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ROUTINE, JSON.stringify(routine));
-  }, [routine]);
+  // Demo Sandbox Entry & Exit
+  const enterDemoMode = useCallback(() => {
+    const demo = getInitialDemoWorkspace();
+    const session: ActiveSession = { type: 'demo' };
+    setActiveSession(session);
+    setUser(demo.user);
+    setSubjects(demo.subjects);
+    setRoutine(demo.routine);
+    setAttendanceRecords(demo.attendanceRecords);
+    setSemesterArchives(demo.semesterArchives);
+    setActiveTab('dashboard');
+    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(attendanceRecords));
-  }, [attendanceRecords]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ARCHIVES, JSON.stringify(semesterArchives));
-  }, [semesterArchives]);
-
-  // Auth functions
-  const login = (email: string, name?: string) => {
-    const newUser: UserProfile = {
-      id: `usr_${Date.now()}`,
-      email,
-      name: name || email.split('@')[0],
-      semesterName: 'Current Semester',
+  const exitDemoMode = useCallback(() => {
+    // Flush current demo changes to demo storage
+    const demoData: UserWorkspaceData = {
+      user: DEFAULT_USER,
+      subjects,
+      routine,
+      attendanceRecords,
+      semesterArchives,
     };
-    setUser(newUser);
-  };
+    localStorage.setItem(STORAGE_KEYS.DEMO_WORKSPACE, JSON.stringify(demoData));
 
-  const register = (email: string, name: string) => {
-    const newUser: UserProfile = {
-      id: `usr_${Date.now()}`,
-      email,
-      name,
-      semesterName: 'Current Semester',
-    };
-    setUser(newUser);
-  };
-
-  const loginAsGuest = () => {
-    setUser(DEFAULT_USER);
-  };
-
-  const logout = () => {
+    // Clear active session and reset in-memory state cleanly
+    setActiveSession(null);
     setUser(null);
-  };
+    setSubjects([]);
+    setRoutine([]);
+    setAttendanceRecords([]);
+    setSemesterArchives([]);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+  }, [subjects, routine, attendanceRecords, semesterArchives]);
+
+  // Alias for backward compatibility
+  const loginAsGuest = enterDemoMode;
+
+  // Sign up for a personal user account - strictly empty workspace!
+  const register = useCallback(
+    (email: string, name: string, college?: string) => {
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanName = name.trim();
+
+      if (!cleanEmail || !cleanName) {
+        return { success: false, error: 'Name and email are required.' };
+      }
+
+      // Check if email already registered on this device
+      const exists = registeredUsers.some(u => u.email.toLowerCase() === cleanEmail);
+      if (exists) {
+        return {
+          success: false,
+          error: 'An account with this email already exists on this device. Please sign in.',
+        };
+      }
+
+      const newUser: UserProfile = {
+        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        email: cleanEmail,
+        name: cleanName,
+        college: college?.trim() || undefined,
+        semesterName: 'Current Semester',
+        isDemo: false,
+      };
+
+      // Strict requirement: New personal workspaces start completely empty!
+      const emptyWorkspace: UserWorkspaceData = {
+        user: newUser,
+        subjects: [],
+        routine: [],
+        attendanceRecords: [],
+        semesterArchives: [],
+      };
+
+      // Save user workspace and update index
+      localStorage.setItem(
+        `${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${newUser.id}`,
+        JSON.stringify(emptyWorkspace)
+      );
+
+      const updatedUsers = [...registeredUsers, newUser];
+      setRegisteredUsers(updatedUsers);
+      localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(updatedUsers));
+
+      // Switch active session to the new user
+      const newSession: ActiveSession = { type: 'user', userId: newUser.id };
+      setActiveSession(newSession);
+      setUser(newUser);
+      setSubjects([]);
+      setRoutine([]);
+      setAttendanceRecords([]);
+      setSemesterArchives([]);
+      setActiveTab('dashboard');
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(newSession));
+
+      return { success: true };
+    },
+    [registeredUsers]
+  );
+
+  // Sign in to an existing personal account on this device
+  const login = useCallback(
+    (email: string) => {
+      const cleanEmail = email.trim().toLowerCase();
+      const foundUser = registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
+
+      if (!foundUser) {
+        return {
+          success: false,
+          error: 'No local account found with this email. Please create a personal workspace.',
+        };
+      }
+
+      // Load this user's isolated workspace
+      const rawWorkspace = localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${foundUser.id}`);
+      const workspace = safeJsonParse<UserWorkspaceData | null>(rawWorkspace, null);
+
+      const session: ActiveSession = { type: 'user', userId: foundUser.id };
+      setActiveSession(session);
+      setUser(foundUser);
+      setSubjects(workspace ? workspace.subjects : []);
+      setRoutine(workspace ? workspace.routine : []);
+      setAttendanceRecords(workspace ? workspace.attendanceRecords : []);
+      setSemesterArchives(workspace ? workspace.semesterArchives : []);
+      setActiveTab('dashboard');
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+
+      return { success: true };
+    },
+    [registeredUsers]
+  );
+
+  const logout = useCallback(() => {
+    setActiveSession(null);
+    setUser(null);
+    setSubjects([]);
+    setRoutine([]);
+    setAttendanceRecords([]);
+    setSemesterArchives([]);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+  }, []);
+
+  const switchUser = useCallback(
+    (userId: string) => {
+      const foundUser = registeredUsers.find(u => u.id === userId);
+      if (!foundUser) return;
+
+      const rawWorkspace = localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${foundUser.id}`);
+      const workspace = safeJsonParse<UserWorkspaceData | null>(rawWorkspace, null);
+
+      const session: ActiveSession = { type: 'user', userId: foundUser.id };
+      setActiveSession(session);
+      setUser(foundUser);
+      setSubjects(workspace ? workspace.subjects : []);
+      setRoutine(workspace ? workspace.routine : []);
+      setAttendanceRecords(workspace ? workspace.attendanceRecords : []);
+      setSemesterArchives(workspace ? workspace.semesterArchives : []);
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+    },
+    [registeredUsers]
+  );
 
   // Subject functions
   const addSubject = (subjectData: Omit<Subject, 'id'>) => {
@@ -203,7 +501,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteSubject = (id: string) => {
     setSubjects(prev => prev.filter(s => s.id !== id));
-    // Also remove from routine
     setRoutine(prev => prev.filter(r => r.subjectId !== id));
   };
 
@@ -245,10 +542,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAttendanceRecords(prev => [newRecord, ...prev]);
 
-    // Update subject attended and total counters:
-    // Present: attended += units, total += units
-    // Absent: attended += 0, total += units
-    // Cancelled: neither increases attended nor total! (PRD feature 6)
     setSubjects(prev =>
       prev.map(s => {
         if (s.id !== subjectId) return s;
@@ -264,7 +557,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             total: s.total + units,
           };
         } else {
-          // Cancelled: no change to counts
           return s;
         }
       })
@@ -276,7 +568,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = attendanceRecords.find(r => r.id === recordId);
     if (!target) return;
 
-    // Revert the counts on the subject
     setSubjects(prev =>
       prev.map(s => {
         if (s.id !== target.subjectId) return s;
@@ -299,7 +590,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAttendanceRecords(prev => prev.filter(r => r.id !== recordId));
   };
 
-  // Sample data loader
+  // Sample data loader (for testing routine in demo or user workspace)
   const loadSampleData = () => {
     setSubjects(SAMPLE_SUBJECTS);
     setRoutine(SAMPLE_ROUTINE);
@@ -332,7 +623,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setSemesterArchives(prev => [archive, ...prev]);
 
-    // Reset current semester counters and routine for fresh start (PRD feature 10)
     resetCurrentRoutineAndAttendance();
     if (user) {
       setUser({ ...user, semesterName: 'New Semester' });
@@ -343,10 +633,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSemesterArchives(prev => prev.filter(a => a.id !== id));
   };
 
-  // Export JSON
+  // Export JSON backup
   const exportDataJson = () => {
     const exportPayload = {
       user,
+      isDemoMode,
       subjects,
       routine,
       attendanceRecords,
@@ -357,12 +648,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `attendance-check-karo-backup-${getTodayDateString()}.json`;
+    link.download = `attendance-check-karo-${user?.name ? user.name.toLowerCase().replace(/\s+/g, '-') : 'workspace'}-${getTodayDateString()}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
-  // Import JSON
+  // Import JSON backup
   const importDataJson = (jsonString: string): boolean => {
     try {
       const data = JSON.parse(jsonString);
@@ -398,19 +689,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         user,
         isAuthenticated: !!user,
+        isDemoMode,
         theme,
         isOffline,
         subjects,
         routine,
         attendanceRecords,
         semesterArchives,
+        registeredUsers,
         activeTab,
         setActiveTab,
         toggleTheme,
         login,
         register,
+        enterDemoMode,
+        exitDemoMode,
         loginAsGuest,
         logout,
+        switchUser,
         addSubject,
         updateSubject,
         deleteSubject,

@@ -6,6 +6,7 @@ export const DEFAULT_USER: UserProfile = {
   name: 'Aman Sharma',
   college: 'National Institute of Technology',
   semesterName: 'Semester 5 (Fall 2026)',
+  isDemo: true,
 };
 
 export const SAMPLE_SUBJECTS: Subject[] = [
