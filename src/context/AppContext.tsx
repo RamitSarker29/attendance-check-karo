@@ -693,6 +693,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             email: cleanEmail,
             password,
             options: {
+              emailRedirectTo: window.location.origin,
               data: {
                 name: cleanName,
                 college: college?.trim() || undefined,
