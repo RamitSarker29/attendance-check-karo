@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { validateEmail, validateName } from '../utils/validation';
 import {
   GraduationCap,
   Mail,
@@ -49,14 +50,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
-      setError('Please provide an email address.');
+
+    // Email format validation for both login and register
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setError(emailValidation.error || 'Please enter a valid email address.');
       return;
     }
 
     if (mode === 'register') {
-      if (!name.trim()) {
-        setError('Please enter your name.');
+      const nameValidation = validateName(name);
+      if (!nameValidation.valid) {
+        setError(nameValidation.error || 'Please enter your name.');
         return;
       }
       const res = register(email, name, college);
@@ -125,7 +130,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
           <div>
             <span className="font-semibold block">Device-Specific Local Storage</span>
             <span>
-              This app runs 100% offline. Workspaces are stored inside this specific browser without remote passwords. To move data to another device, use the JSON Backup Export in Settings.
+              This app runs 100% offline. Workspaces are stored inside this specific browser without remote passwords or verification emails. Format validation is performed locally. To move data to another device, use the JSON Backup Export in Settings.
             </span>
           </div>
         </div>
@@ -272,7 +277,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                         type="text"
                         placeholder="e.g. John Doe"
                         value={name}
-                        onChange={e => setName(e.target.value)}
+                        onChange={e => {
+                          setName(e.target.value);
+                          if (error) setError('');
+                        }}
                         className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
                         required
                       />
@@ -289,7 +297,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                         type="text"
                         placeholder="e.g. Stanford University"
                         value={college}
-                        onChange={e => setCollege(e.target.value)}
+                        onChange={e => {
+                          setCollege(e.target.value);
+                          if (error) setError('');
+                        }}
                         className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
@@ -305,13 +316,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                   <Mail className="w-4 h-4 text-slate-400 dark:text-zinc-500 absolute left-3 top-2.5" />
                   <input
                     type="email"
-                    placeholder="student@college.edu"
+                    placeholder="student@college.edu or name@gmail.com"
                     value={email}
-                    onChange={e => setEmail(e.target.value)}
+                    onChange={e => {
+                      setEmail(e.target.value);
+                      if (error) setError('');
+                    }}
                     className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
                     required
                   />
                 </div>
+                <span className="text-[10px] text-slate-400 dark:text-zinc-500 block mt-1">
+                  Accepts college domains (.edu, .ac.in, .edu.in) or major providers (@gmail.com, @outlook.com, @yahoo.com, @icloud.com)
+                </span>
               </div>
 
               {/* Saved accounts quick-select if in login mode */}
@@ -327,6 +344,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                         key={u.id}
                         onClick={() => {
                           setEmail(u.email);
+                          if (error) setError('');
                         }}
                         className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-[11px] font-mono border border-slate-200 dark:border-zinc-700"
                       >

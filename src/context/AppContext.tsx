@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { DEFAULT_USER, SAMPLE_SUBJECTS, SAMPLE_ROUTINE } from '../utils/initialData';
 import { getTodayDateString } from '../utils/calculations';
+import { normalizeEmail, validateEmail, validateName } from '../utils/validation';
 import confetti from 'canvas-confetti';
 
 interface AppContextType {
@@ -165,6 +166,29 @@ function getInitialDemoWorkspace(): UserWorkspaceData {
   return defaultDemo;
 }
 
+// Helper to safely scan stored user workspaces without modifying or deleting them
+function scanLocalWorkspaces(): UserProfile[] {
+  const recoveredUsers: UserProfile[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(STORAGE_KEYS.USER_WORKSPACE_PREFIX)) {
+        const raw = localStorage.getItem(key);
+        const ws = safeJsonParse<UserWorkspaceData | null>(raw, null);
+        if (ws && ws.user && ws.user.id && ws.user.email) {
+          // Verify this user isn't already added in our scan
+          if (!recoveredUsers.some(u => u.id === ws.user.id)) {
+            recoveredUsers.push(ws.user);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Workspace scan error:', err);
+  }
+  return recoveredUsers;
+}
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -180,9 +204,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return safeJsonParse<ActiveSession>(saved, null);
   });
 
-  // Registered local users list
+  // Registered local users list with self-healing recovery from stored workspaces
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>(() => {
-    return safeJsonParse<UserProfile[]>(localStorage.getItem(STORAGE_KEYS.USERS_INDEX), []);
+    const saved = safeJsonParse<UserProfile[]>(localStorage.getItem(STORAGE_KEYS.USERS_INDEX), []);
+    if (Array.isArray(saved) && saved.length > 0) {
+      return saved;
+    }
+    const recovered = scanLocalWorkspaces();
+    if (recovered.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(recovered));
+      return recovered;
+    }
+    return [];
   });
 
   // Active workspace state
@@ -318,9 +351,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [activeSession, user, subjects, routine, attendanceRecords, semesterArchives]);
 
-  // Sync registered users list
+  // Sync registered users list safely: NEVER overwrite valid stored accounts with an empty list!
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(registeredUsers));
+    if (registeredUsers.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(registeredUsers));
+    } else {
+      const existingInStorage = safeJsonParse<UserProfile[]>(
+        localStorage.getItem(STORAGE_KEYS.USERS_INDEX),
+        []
+      );
+      const existingWorkspaces = scanLocalWorkspaces();
+      if (existingInStorage.length === 0 && existingWorkspaces.length === 0) {
+        localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify([]));
+      }
+    }
   }, [registeredUsers]);
 
   // Demo Sandbox Entry & Exit
@@ -364,15 +408,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sign up for a personal user account - strictly empty workspace!
   const register = useCallback(
     (email: string, name: string, college?: string) => {
-      const cleanEmail = email.trim().toLowerCase();
-      const cleanName = name.trim();
+      const cleanEmail = normalizeEmail(email);
+      const cleanName = (name || '').trim();
 
-      if (!cleanEmail || !cleanName) {
-        return { success: false, error: 'Name and email are required.' };
+      // Email format validation
+      const emailValidation = validateEmail(cleanEmail);
+      if (!emailValidation.valid) {
+        return { success: false, error: emailValidation.error };
       }
 
-      // Check if email already registered on this device
-      const exists = registeredUsers.some(u => u.email.toLowerCase() === cleanEmail);
+      // Name validation
+      const nameValidation = validateName(cleanName);
+      if (!nameValidation.valid) {
+        return { success: false, error: nameValidation.error };
+      }
+
+      // Check across disk storage, in-memory state, and stored workspaces to prevent duplicates
+      const currentDiskUsers = safeJsonParse<UserProfile[]>(
+        localStorage.getItem(STORAGE_KEYS.USERS_INDEX),
+        []
+      );
+      const allKnownUsersMap = new Map<string, UserProfile>();
+      currentDiskUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+      registeredUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+      scanLocalWorkspaces().forEach(u => allKnownUsersMap.set(u.id, u));
+      const allKnownUsers = Array.from(allKnownUsersMap.values());
+
+      const exists = allKnownUsers.some(u => normalizeEmail(u.email) === cleanEmail);
       if (exists) {
         return {
           success: false,
@@ -398,13 +460,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         semesterArchives: [],
       };
 
-      // Save user workspace and update index
+      // Save user workspace and update index atomically
       localStorage.setItem(
         `${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${newUser.id}`,
         JSON.stringify(emptyWorkspace)
       );
 
-      const updatedUsers = [...registeredUsers, newUser];
+      const updatedUsers = [...allKnownUsers, newUser];
       setRegisteredUsers(updatedUsers);
       localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(updatedUsers));
 
@@ -427,8 +489,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sign in to an existing personal account on this device
   const login = useCallback(
     (email: string) => {
-      const cleanEmail = email.trim().toLowerCase();
-      const foundUser = registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
+      const cleanEmail = normalizeEmail(email);
+
+      // Email format validation
+      const emailValidation = validateEmail(cleanEmail);
+      if (!emailValidation.valid) {
+        return { success: false, error: emailValidation.error };
+      }
+
+      // Read fresh users from disk first, then merge with in-memory state
+      const currentDiskUsers = safeJsonParse<UserProfile[]>(
+        localStorage.getItem(STORAGE_KEYS.USERS_INDEX),
+        []
+      );
+      const allKnownUsersMap = new Map<string, UserProfile>();
+      currentDiskUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+      registeredUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+
+      let foundUser = Array.from(allKnownUsersMap.values()).find(
+        u => normalizeEmail(u.email) === cleanEmail
+      );
+
+      // Self-healing: if not found in index, check stored workspaces (without modifying existing workspace data)
+      if (!foundUser) {
+        const workspaceUsers = scanLocalWorkspaces();
+        foundUser = workspaceUsers.find(u => normalizeEmail(u.email) === cleanEmail);
+        if (foundUser) {
+          // Re-index the recovered user metadata safely without touching workspace contents
+          const restoredUsers = [
+            ...Array.from(allKnownUsersMap.values()).filter(u => u.id !== foundUser!.id),
+            foundUser,
+          ];
+          localStorage.setItem(STORAGE_KEYS.USERS_INDEX, JSON.stringify(restoredUsers));
+          setRegisteredUsers(restoredUsers);
+        }
+      }
 
       if (!foundUser) {
         return {
@@ -468,7 +563,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchUser = useCallback(
     (userId: string) => {
-      const foundUser = registeredUsers.find(u => u.id === userId);
+      const currentDiskUsers = safeJsonParse<UserProfile[]>(
+        localStorage.getItem(STORAGE_KEYS.USERS_INDEX),
+        []
+      );
+      const allKnownUsersMap = new Map<string, UserProfile>();
+      currentDiskUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+      registeredUsers.forEach(u => allKnownUsersMap.set(u.id, u));
+      scanLocalWorkspaces().forEach(u => allKnownUsersMap.set(u.id, u));
+
+      const foundUser = allKnownUsersMap.get(userId);
       if (!foundUser) return;
 
       const rawWorkspace = localStorage.getItem(`${STORAGE_KEYS.USER_WORKSPACE_PREFIX}${foundUser.id}`);
