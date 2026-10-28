@@ -9,6 +9,7 @@ import { LeaveSimulator } from './components/LeaveSimulator';
 import { HistoryLog } from './components/HistoryLog';
 import { SemesterManager } from './components/SemesterManager';
 import { AuthModal } from './components/AuthModal';
+import { MigrationBanner } from './components/MigrationBanner';
 import { ShieldCheck } from 'lucide-react';
 
 const AppContent: React.FC = () => {
@@ -35,6 +36,7 @@ const AppContent: React.FC = () => {
           />
         ) : (
           <>
+            <MigrationBanner />
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'routine' && <RoutineManager />}
             {activeTab === 'subjects' && <SubjectList />}

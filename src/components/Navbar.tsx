@@ -13,6 +13,9 @@ import {
   GraduationCap,
   Sparkles,
   LogOut,
+  Cloud,
+  CloudOff,
+  RefreshCw,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -30,6 +33,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth }) => {
     activeTab,
     setActiveTab,
     isOffline,
+    syncStatus,
+    isSupabaseConfigured,
+    retrySync,
     triggerCelebration,
   } = useApp();
 
@@ -134,6 +140,40 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth }) => {
                   <span>Exit Demo</span>
                 </button>
               </div>
+            )}
+
+            {/* Cloud Sync Indicator (when authenticated in personal account) */}
+            {isAuthenticated && !isDemoMode && isSupabaseConfigured && (
+              <>
+                {(syncStatus === 'syncing' || syncStatus === 'loading') && (
+                  <div
+                    title="Synchronizing changes with Supabase Cloud..."
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span className="hidden sm:inline">Syncing...</span>
+                  </div>
+                )}
+                {syncStatus === 'saved' && (
+                  <div
+                    title="All changes safely backed up to Supabase Cloud"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Cloud Synced</span>
+                  </div>
+                )}
+                {syncStatus === 'error' && (
+                  <button
+                    onClick={retrySync}
+                    title="Cloud sync error. Click to retry."
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition-colors"
+                  >
+                    <CloudOff className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sync Error (Retry)</span>
+                  </button>
+                )}
+              </>
             )}
 
             {/* Offline indicator */}

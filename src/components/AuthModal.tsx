@@ -7,10 +7,15 @@ import {
   User,
   LogOut,
   Sparkles,
-  Info,
   Building2,
-  Users,
+  Lock,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
   ArrowRight,
+  Cloud,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -24,38 +29,77 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
     user,
     isAuthenticated,
     isDemoMode,
+    isSupabaseConfigured,
     registeredUsers,
     login,
     register,
+    resetPassword,
     enterDemoMode,
     exitDemoMode,
     logout,
     switchUser,
   } = useApp();
 
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode);
   const [prevInitialMode, setPrevInitialMode] = useState(initialMode);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [college, setCollege] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [emailConfirmationSent, setEmailConfirmationSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   if (initialMode !== prevInitialMode) {
     setPrevInitialMode(initialMode);
     setMode(initialMode);
     setError('');
+    setSuccessMessage('');
+    setEmailConfirmationSent(false);
   }
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setSuccessMessage('');
 
-    // Email format validation for both login and register
+    // Email format & domain validation
     const emailValidation = validateEmail(email);
     if (!emailValidation.valid) {
       setError(emailValidation.error || 'Please enter a valid email address.');
       return;
+    }
+
+    // Forgot password flow
+    if (mode === 'forgot') {
+      setIsLoading(true);
+      try {
+        const res = await resetPassword(email);
+        if (!res.success) {
+          setError(res.error || 'Failed to send password reset link.');
+        } else {
+          setSuccessMessage(`Password reset link sent to ${email}. Check your inbox!`);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // Password validation for register and login if Supabase is configured
+    if (isSupabaseConfigured) {
+      if (!password) {
+        setError('Please enter your password.');
+        return;
+      }
+      if (mode === 'register' && password.length < 6) {
+        setError('Password must be at least 6 characters long.');
+        return;
+      }
     }
 
     if (mode === 'register') {
@@ -64,24 +108,39 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
         setError(nameValidation.error || 'Please enter your name.');
         return;
       }
-      const res = register(email, name, college);
-      if (!res.success) {
-        setError(res.error || 'Failed to create workspace.');
-        return;
+
+      setIsLoading(true);
+      try {
+        const res = await register(email, password, name, college);
+        if (!res.success) {
+          setError(res.error || 'Failed to create workspace.');
+          return;
+        }
+
+        if (res.emailConfirmationRequired) {
+          setEmailConfirmationSent(true);
+          return;
+        }
+
+        onClose();
+      } finally {
+        setIsLoading(false);
       }
     } else {
-      const res = login(email);
-      if (!res.success) {
-        setError(res.error || 'Account not found.');
-        return;
+      // Login flow
+      setIsLoading(true);
+      try {
+        const res = await login(email, password);
+        if (!res.success) {
+          setError(res.error || 'Account not found.');
+          return;
+        }
+
+        onClose();
+      } finally {
+        setIsLoading(false);
       }
     }
-
-    setError('');
-    setEmail('');
-    setName('');
-    setCollege('');
-    onClose();
   };
 
   const handleLaunchDemo = () => {
@@ -109,6 +168,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                   ? isDemoMode
                     ? 'Demo Sandbox Profile'
                     : 'Personal Student Account'
+                  : mode === 'forgot'
+                  ? 'Reset Your Password'
                   : mode === 'login'
                   ? 'Sign In to Workspace'
                   : 'Create Personal Workspace'}
@@ -124,16 +185,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
           </button>
         </div>
 
-        {/* Local-Only Architecture Transparency Banner */}
-        <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-900 dark:text-blue-300 text-xs flex items-start gap-2.5 leading-relaxed">
-          <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold block">Device-Specific Local Storage</span>
-            <span>
-              This app runs 100% offline. Workspaces are stored inside this specific browser without remote passwords or verification emails. Format validation is performed locally. To move data to another device, use the JSON Backup Export in Settings.
-            </span>
+        {/* Configuration Notice */}
+        {!isSupabaseConfigured ? (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-xs flex items-start gap-2.5 leading-relaxed">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold block">Supabase Cloud Sync Not Configured</span>
+              <span>
+                To sync your attendance across your phone and PC, add your Supabase credentials to <code className="px-1 py-0.5 rounded bg-amber-500/20 font-mono text-[11px]">.env</code>. You can still test all features locally or launch the Demo Sandbox.
+              </span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-900 dark:text-emerald-300 text-xs flex items-start gap-2.5 leading-relaxed">
+            <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold block">Cloud Sync Enabled</span>
+              <span>
+                Your timetable, attendance marks, and calculations will automatically sync in real-time between your phone and computer.
+              </span>
+            </div>
+          </div>
+        )}
 
         {isAuthenticated && user ? (
           /* Profile view if currently signed in */
@@ -141,11 +214,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-lg border ${
-                    isDemoMode
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                      : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  }`}>
+                  <div
+                    className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-lg border ${
+                      isDemoMode
+                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                    }`}
+                  >
                     {user.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
@@ -172,7 +247,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
             {registeredUsers.length > 1 && !isDemoMode && (
               <div className="space-y-2">
                 <span className="text-xs font-semibold text-slate-600 dark:text-zinc-400 flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" />
+                  <Building2 className="w-3.5 h-3.5" />
                   <span>Other Local Accounts on this Device:</span>
                 </span>
                 <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
@@ -210,11 +285,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (isDemoMode) {
                     exitDemoMode();
                   } else {
-                    logout();
+                    await logout();
                   }
                   onClose();
                 }}
@@ -225,42 +300,79 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
               </button>
             </div>
           </div>
-        ) : (
-          /* Sign In / Sign Up Form */
-          <div className="space-y-4">
-            {/* Mode Switcher Tabs */}
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-zinc-950 rounded-xl border border-slate-200 dark:border-zinc-800">
+        ) : emailConfirmationSent ? (
+          /* Email Confirmation View */
+          <div className="space-y-4 py-3 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+            </div>
+            <div className="space-y-1.5">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Verify Your Email Address</h4>
+              <p className="text-xs text-slate-600 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                We've sent a verification link to <strong className="text-slate-800 dark:text-zinc-200">{email}</strong>. Please check your inbox and click the link to activate your cloud workspace.
+              </p>
+            </div>
+            <div className="pt-2">
               <button
+                type="button"
                 onClick={() => {
+                  setEmailConfirmationSent(false);
                   setMode('login');
-                  setError('');
                 }}
-                className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
-                  mode === 'login'
-                    ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white font-semibold shadow-sm'
-                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
-                }`}
+                className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold transition-colors"
               >
-                Sign In
-              </button>
-              <button
-                onClick={() => {
-                  setMode('register');
-                  setError('');
-                }}
-                className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
-                  mode === 'register'
-                    ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white font-semibold shadow-sm'
-                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
-                }`}
-              >
-                Create Account
+                Return to Sign In
               </button>
             </div>
+          </div>
+        ) : (
+          /* Sign In / Sign Up / Forgot Password Form */
+          <div className="space-y-4">
+            {/* Mode Switcher Tabs */}
+            {mode !== 'forgot' && (
+              <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-zinc-950 rounded-xl border border-slate-200 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                    setSuccessMessage('');
+                  }}
+                  className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
+                    mode === 'login'
+                      ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white font-semibold shadow-sm'
+                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    setError('');
+                    setSuccessMessage('');
+                  }}
+                  className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
+                    mode === 'register'
+                      ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white font-semibold shadow-sm'
+                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Create Account
+                </button>
+              </div>
+            )}
 
             {error && (
-              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs">
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs leading-relaxed">
                 {error}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs leading-relaxed">
+                {successMessage}
               </div>
             )}
 
@@ -283,6 +395,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                         }}
                         className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
                         required
+                        disabled={isLoading}
                       />
                     </div>
                   </div>
@@ -302,6 +415,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                           if (error) setError('');
                         }}
                         className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                        disabled={isLoading}
                       />
                     </div>
                   </div>
@@ -324,6 +438,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                     }}
                     className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <span className="text-[10px] text-slate-400 dark:text-zinc-500 block mt-1">
@@ -331,8 +446,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                 </span>
               </div>
 
-              {/* Saved accounts quick-select if in login mode */}
-              {mode === 'login' && registeredUsers.length > 0 && (
+              {/* Password field for login & register */}
+              {mode !== 'forgot' && isSupabaseConfigured && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-zinc-400">
+                      Password
+                    </label>
+                    {mode === 'login' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('forgot');
+                          setError('');
+                          setSuccessMessage('');
+                        }}
+                        className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 dark:text-zinc-500 absolute left-3 top-2.5" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={mode === 'register' ? 'At least 6 characters' : 'Enter your password'}
+                      value={password}
+                      onChange={e => {
+                        setPassword(e.target.value);
+                        if (error) setError('');
+                      }}
+                      className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-xl pl-9 pr-9 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                      required
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(p => !p)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Saved accounts quick-select if in login mode without Supabase */}
+              {mode === 'login' && !isSupabaseConfigured && registeredUsers.length > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">
                     Or select an account found on this browser:
@@ -357,10 +518,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition-colors shadow-sm shadow-emerald-500/20"
+                disabled={isLoading}
+                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 text-xs font-bold transition-all shadow-sm shadow-emerald-500/20 flex items-center justify-center gap-1.5"
               >
-                {mode === 'login' ? 'Open Personal Workspace' : 'Create Empty Personal Workspace'}
+                {isLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Please wait...</span>
+                  </>
+                ) : mode === 'forgot' ? (
+                  'Send Password Reset Link'
+                ) : mode === 'login' ? (
+                  'Sign In to Account'
+                ) : (
+                  'Create Cloud Workspace'
+                )}
               </button>
+
+              {mode === 'forgot' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                    setSuccessMessage('');
+                  }}
+                  className="w-full text-center text-xs text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 pt-1"
+                >
+                  Back to Sign In
+                </button>
+              )}
             </form>
 
             {/* Quick Demo Sandbox Option */}

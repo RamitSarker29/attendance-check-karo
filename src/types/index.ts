@@ -69,6 +69,8 @@ export type ActiveSession =
   | { type: 'user'; userId: string }
   | null;
 
+export type SyncStatus = 'idle' | 'loading' | 'syncing' | 'saved' | 'error' | 'offline';
+
 export interface AttendanceMetrics {
   percentage: number;
   attended: number;
