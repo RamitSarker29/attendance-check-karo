@@ -12,10 +12,8 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
-  AlertTriangle,
   RefreshCw,
   ArrowRight,
-  Cloud,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -185,28 +183,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
           </button>
         </div>
 
-        {/* Configuration Notice */}
-        {!isSupabaseConfigured ? (
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-xs flex items-start gap-2.5 leading-relaxed">
-            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-semibold block">Supabase Cloud Sync Not Configured</span>
-              <span>
-                To sync your attendance across your phone and PC, add your Supabase credentials to <code className="px-1 py-0.5 rounded bg-amber-500/20 font-mono text-[11px]">.env</code>. You can still test all features locally or launch the Demo Sandbox.
-              </span>
-            </div>
-          </div>
-        ) : (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-900 dark:text-emerald-300 text-xs flex items-start gap-2.5 leading-relaxed">
-            <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-semibold block">Cloud Sync Enabled</span>
-              <span>
-                Your timetable, attendance marks, and calculations will automatically sync in real-time between your phone and computer.
-              </span>
-            </div>
-          </div>
-        )}
+
+
 
         {isAuthenticated && user ? (
           /* Profile view if currently signed in */
@@ -248,7 +226,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
               <div className="space-y-2">
                 <span className="text-xs font-semibold text-slate-600 dark:text-zinc-400 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5" />
-                  <span>Other Local Accounts on this Device:</span>
+                  <span>Other Accounts on this Device:</span>
                 </span>
                 <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                   {registeredUsers
@@ -531,7 +509,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
                 ) : mode === 'login' ? (
                   'Sign In to Account'
                 ) : (
-                  'Create Cloud Workspace'
+                  'Create Account'
                 )}
               </button>
 

@@ -147,7 +147,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth }) => {
               <>
                 {(syncStatus === 'syncing' || syncStatus === 'loading') && (
                   <div
-                    title="Synchronizing changes with Supabase Cloud..."
+                    title="Saving your changes…"
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
                   >
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -156,21 +156,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth }) => {
                 )}
                 {syncStatus === 'saved' && (
                   <div
-                    title="All changes safely backed up to Supabase Cloud"
+                    title="All changes saved"
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
                   >
                     <Cloud className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Cloud Synced</span>
+                    <span className="hidden sm:inline">Saved</span>
                   </div>
                 )}
                 {syncStatus === 'error' && (
                   <button
                     onClick={retrySync}
-                    title="Cloud sync error. Click to retry."
+                    title="Couldn't save your changes. Check your internet connection and tap to retry."
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition-colors"
                   >
                     <CloudOff className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Sync Error (Retry)</span>
+                    <span className="hidden sm:inline">Couldn't save — Retry</span>
                   </button>
                 )}
               </>
@@ -179,11 +179,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth }) => {
             {/* Offline indicator */}
             {isOffline && (
               <div
-                title="Running in offline mode. All data is saved locally on your device."
+                title="You're offline. Changes will be saved when you reconnect."
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30"
               >
                 <WifiOff className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Offline Mode</span>
+                <span className="hidden sm:inline">Offline</span>
               </div>
             )}
 
